@@ -1,3 +1,9 @@
 #videos
 *.mp4
 data/videos/
+
+
+venv/
+__pycache__/
+*.pyc
+.DS_Store
