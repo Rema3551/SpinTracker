@@ -11,10 +11,15 @@ Objectif :
 """
 
 import os
+# pyrefly: ignore [missing-import]
 import joblib
+# pyrefly: ignore [missing-import]
 import pandas as pd
+# pyrefly: ignore [missing-import]
 from sklearn.ensemble import RandomForestClassifier
+# pyrefly: ignore [missing-import]
 from sklearn.metrics import classification_report, confusion_matrix
+# pyrefly: ignore [missing-import]
 from sklearn.model_selection import train_test_split
 
 def train_classifier(dataset_csv: str = "data/processed/dataset.csv", model_path: str = "data/processed/model.joblib"):
