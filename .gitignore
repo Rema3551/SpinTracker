@@ -1,9 +1,24 @@
-#videos
-*.mp4
-data/videos/
-
-
+# Environnements virtuels et caches Python
 venv/
+.venv/
 __pycache__/
 *.pyc
+*.pyo
+
+# Vidéos volumineuses
+*.mp4
+*.mov
+*.avi
+data/raw_videos/*/*
+!data/raw_videos/*/.gitkeep
+
+# Données générées et modèles entraînés
+data/processed/*.csv
+data/processed/*.joblib
+!data/processed/.gitkeep
+
+# Système & IDE
 .DS_Store
+Thumbs.db
+.vscode/
+.idea/
