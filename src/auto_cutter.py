@@ -133,35 +133,85 @@ def process_long_video(
         print(f"  Zone d'interet (ROI) : x=[{rx1:.2f}, {rx2:.2f}], y=[{ry1:.2f}, {ry2:.2f}]")
     print("="*50)
 
-    # 1. Extraction des coordonnées et calcul du signal de mouvement de table
-    pose = mp_pose.Pose(min_detection_confidence=0.3, min_tracking_confidence=0.3)
-    
-    wrist_coords = []
-    landmarks_per_frame = []
+    # 1. PASSE 1 : Scan ultra-rapide de l'activité sur la table (sans IA)
+    print("[1/3] ⚡ Scan ultra-rapide de l'activité sur la table...")
     table_motion = []
-    prev_table_gray = None
+    prev_table_thumb = None
+    ty1, ty2 = int(frame_h * 0.35), int(frame_h * 0.65)
+    tx1, tx2 = int(frame_w * 0.05), int(frame_w * 0.55)
 
-    print("[1/3] Analyse MediaPipe et suivi des echanges sur la table...")
     frame_idx = 0
     while cap.isOpened():
         ret, frame = cap.read()
         if not ret:
             break
 
-        # Mesure d'activite sur la table de ping-pong (detection d'echanges)
-        table_crop = frame[int(frame_h * 0.35):int(frame_h * 0.65), int(frame_w * 0.05):int(frame_w * 0.55)]
-        t_gray = cv2.cvtColor(table_crop, cv2.COLOR_BGR2GRAY)
-        if prev_table_gray is not None:
-            t_diff = cv2.absdiff(t_gray, prev_table_gray)
-            _, t_thresh = cv2.threshold(t_diff, 20, 255, cv2.THRESH_BINARY)
-            table_motion.append(np.sum(t_thresh > 0))
+        table_crop = frame[ty1:ty2, tx1:tx2]
+        t_thumb = cv2.resize(cv2.cvtColor(table_crop, cv2.COLOR_BGR2GRAY), (160, 90))
+        if prev_table_thumb is not None:
+            t_diff = cv2.absdiff(t_thumb, prev_table_thumb)
+            _, t_thresh = cv2.threshold(t_diff, 18, 255, cv2.THRESH_BINARY)
+            table_motion.append(float(np.sum(t_thresh > 0)))
         else:
-            table_motion.append(0)
-        prev_table_gray = t_gray
+            table_motion.append(0.0)
+        prev_table_thumb = t_thumb
 
-        # Appliquer le ROI si défini
+        frame_idx += 1
+        if frame_idx % 1500 == 0:
+            print(f"  -> Scan préliminaire : {frame_idx}/{total_frames} frames ({frame_idx/fps:.1f}s)...")
+
+    cap.release()
+
+    # Détection des échanges actifs
+    table_motion = np.array(table_motion)
+    win_m = max(5, int(0.5 * fps))
+    smooth_motion = np.convolve(table_motion, np.ones(win_m)/win_m, mode='same')
+    motion_thresh = np.percentile(smooth_motion, 55)
+    raw_rally = smooth_motion > motion_thresh
+
+    # Marge de sécurité (+/- 0.8s) autour des échanges
+    margin_frames = int(0.8 * fps)
+    is_rally = np.copy(raw_rally)
+    for idx in np.where(raw_rally)[0]:
+        start_m = max(0, idx - margin_frames)
+        end_m = min(total_frames, idx + margin_frames)
+        is_rally[start_m:end_m] = True
+
+    active_frames = int(np.sum(is_rally))
+    print(f"  ✓ Temps morts éliminés : {total_frames - active_frames}/{total_frames} frames ({(total_frames - active_frames)/total_frames*100:.1f}%) ignorées !")
+    print(f"  ✓ Échanges réels ciblés : {active_frames} frames ({active_frames/fps:.1f}s).")
+
+    # PASSE 2 : Analyse MediaPipe UNIQUEMENT sur les rallyes actifs
+    print("\n[2/3] 🤖 Analyse ciblée MediaPipe sur les échanges...")
+    cap = cv2.VideoCapture(video_path)
+    pose = mp_pose.Pose(min_detection_confidence=0.3, min_tracking_confidence=0.3)
+    wrist_coords = []
+    landmarks_per_frame = []
+
+    # Downscaling si vidéo trop grande
+    target_w = min(854, frame_w)
+    scale_factor = target_w / frame_w
+    target_h = int(frame_h * scale_factor)
+    need_resize = (scale_factor < 0.95)
+
+    frame_idx = 0
+    analyzed_frames = 0
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        if frame_idx < len(is_rally) and not is_rally[frame_idx]:
+            wrist_coords.append((frame_idx, np.nan, np.nan))
+            landmarks_per_frame.append({})
+            frame_idx += 1
+            continue
+
+        analyzed_frames += 1
         if roi != (0.0, 0.0, 1.0, 1.0):
             proc_frame = frame[y_min_px:y_max_px, x_min_px:x_max_px]
+        elif need_resize:
+            proc_frame = cv2.resize(frame, (target_w, target_h), interpolation=cv2.INTER_LINEAR)
         else:
             proc_frame = frame
 
@@ -171,7 +221,6 @@ def process_long_video(
         if res.pose_landmarks:
             lm = res.pose_landmarks.landmark
             rw = lm[mp_pose.PoseLandmark.RIGHT_WRIST.value]
-            # Remapper les coordonnées si ROI
             if roi != (0.0, 0.0, 1.0, 1.0):
                 norm_x = rx1 + rw.x * (rx2 - rx1)
                 norm_y = ry1 + rw.y * (ry2 - ry1)
@@ -198,8 +247,8 @@ def process_long_video(
             landmarks_per_frame.append({})
 
         frame_idx += 1
-        if frame_idx % 300 == 0:
-            print(f"  -> Analyse : {frame_idx}/{total_frames} frames ({frame_idx/fps:.1f}s)...")
+        if analyzed_frames % 250 == 0:
+            print(f"  -> Analyse IA : frame {frame_idx}/{total_frames} ({frame_idx/total_frames*100:.1f}%)...")
 
     cap.release()
     pose.close()
@@ -224,15 +273,6 @@ def process_long_video(
     # Lissage par moyenne mobile (5 frames)
     window_size = 5
     smoothed_speeds = np.convolve(speeds, np.ones(window_size)/window_size, mode='same')
-
-    # Filtrage des echanges actifs sur la table (elimination des temps morts / marches)
-    table_motion = np.array(table_motion)
-    win_m = max(5, int(0.4 * fps))
-    smooth_motion = np.convolve(table_motion, np.ones(win_m)/win_m, mode='same')
-    motion_thresh = np.percentile(smooth_motion, 65)
-    is_rally = smooth_motion > motion_thresh
-
-    # Signal de frappe balle-raquette : vitesse du poignet ponderee par l'activite de la table
     strike_signal = smoothed_speeds * is_rally
 
     # 2. Détection des contacts balle-raquette

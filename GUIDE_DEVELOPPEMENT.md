@@ -209,10 +209,125 @@ python src/pipeline.py
 
 ---
 
-## 🚀 Pistes d'Amélioration & Défis Personnels
+---
 
-Une fois la base fonctionnelle codée, voici des extensions stimulantes à programmer :
-- [ ] **Normalisation par la taille du buste** : Diviser les déplacements $(x, y)$ par la distance entre les deux épaules ou entre l'épaule et la hanche pour que les features soient invariantes à la distance de la caméra.
-- [ ] **Détection automatique du début et de la fin du coup** : Analyser le pic de vitesse du poignet pour isoler automatiquement la phase active dans une vidéo plus longue.
-- [ ] **Inférence en temps réel sur webcam** : Créer un script `src/04_live_inference.py` avec un buffer glissant des 30 dernières frames pour prédire le geste en direct.
-- [ ] **Comparaison d'algorithmes** : Tester XGBoost, LightGBM ou un SVM et comparer les matrices de confusion.
+## 🏓 Étape 5 : L'Analyse Complète de Match (`src/match_analyzer.py`)
+
+### 🧠 Théorie & Défis Techniques
+
+Analyser un match réel de 10 à 30 minutes avec 2 joueurs pose des problématiques bien plus complexes que classifier un clip isolé :
+
+#### 1. Identification du Joueur & Changement de Côté à chaque Set
+Dans un match officiel de tennis de table :
+- Il y a **2 joueurs** filmés en permanence.
+- Les joueurs **changent de côté à la fin de chaque set** (par exemple, Joueur A commence au premier plan, puis passe au fond de court au set 2, revient au premier plan au set 3, etc.).
+- **À la manche décisive**, ils permutent également dès que le premier joueur atteint **5 points**.
+
+**Stratégie de suivi du joueur sélectionné :**
+1. **Initialisation** : L'utilisateur déclare sa position de départ (`near` = premier plan / `far` = fond de court) ou sa couleur de tenue.
+2. **Signature visuelle (Color Re-ID)** :
+   - On extrait la boîte englobante du torse du joueur (entre épaules et hanches).
+   - On calcule l'histogramme de couleur (espace HSV) de son maillot.
+   - Cette empreinte colorimétrique permet de revalider l'identité du joueur même après un temps mort ou un déplacement hors champ.
+3. **Détection des transitions de set** :
+   - Les sets sont séparés par un temps mort prolongé (> 30 à 60 secondes d'inactivité sur la table).
+   - Les deux joueurs changent de côté en marchant autour de la table.
+   - L'algorithme bascule automatiquement l'assignation du côté pour le set suivant.
+
+---
+
+#### 2. Séquençage des Échanges (Rally Engine)
+Chaque échange (rallye) suit un cycle de vie précis :
+1. **Service** : Amorçage du point, balle mise en jeu.
+2. **Échange actif** : Alternance des frappes (Joueur 1 $\leftrightarrow$ Joueur 2).
+3. **Fin de point** : Arrêt du mouvement de la balle sur la table, temps mort avant le service suivant.
+
+---
+
+#### 3. Logique de Qualification des Coups (Réussi, Faute, Winner)
+Pour chaque coup exécuté par notre joueur :
+
+```mermaid
+flowchart TD
+    A[Coup joué par notre joueur] --> B{L'adversaire rejoue-t-il ?}
+    B -- Oui --> C[Coup Réussi (In-Play)]
+    B -- Non --> D{Qui marque le point ?}
+    D -- Notre Joueur --> E[🏆 Point Gagnant / Winner]
+    D -- Adversaire --> F[❌ Faute Directe]
+```
+
+- **Coup Réussi (`success`)** :
+  - Le coup franchit le filet, rebondit sur la table adverse et l'adversaire effectue un coup de renvoi. L'échange continue.
+- **Point Gagnant / Winner (`winner`)** :
+  - Le coup est le dernier coup valide joué par notre joueur.
+  - L'adversaire est pris de vitesse, ne touche pas la balle ou commet une faute directe immédiate en tentant de la remettre.
+  - Le point est attribué à notre joueur.
+- **Faute Directe (`unforced_error`)** :
+  - Le coup heurte le filet ou sort directement de la table sans que l'adversaire n'ait eu à jouer.
+  - Le point est perdu.
+
+---
+
+### 📊 Tableau Statistique Produit
+
+Le moteur calcule et structure les données sous ce format JSON normalisé :
+
+```json
+{
+  "summary": {
+    "total_points": 48,
+    "points_won": 26,
+    "points_lost": 22,
+    "win_rate": 54.2
+  },
+  "strokes_breakdown": [
+    {
+      "stroke": "TopSpin",
+      "total": 34,
+      "successful": 28,
+      "success_rate": 82.4,
+      "unforced_errors": 6,
+      "error_rate": 17.6,
+      "winners": 11,
+      "winner_rate": 32.4
+    },
+    {
+      "stroke": "Bloc",
+      "total": 12,
+      "successful": 9,
+      "success_rate": 75.0,
+      "unforced_errors": 3,
+      "error_rate": 25.0,
+      "winners": 4,
+      "winner_rate": 33.3
+    },
+    {
+      "stroke": "Poussette",
+      "total": 18,
+      "successful": 17,
+      "success_rate": 94.4,
+      "unforced_errors": 1,
+      "error_rate": 5.6,
+      "winners": 2,
+      "winner_rate": 11.1
+    }
+  ],
+  "sets": [
+    { "set_number": 1, "player_side": "near", "points_won": 11, "points_lost": 8, "strokes": [...] },
+    { "set_number": 2, "player_side": "far", "points_won": 9, "points_lost": 11, "strokes": [...] }
+  ],
+  "rallies": [...]
+}
+```
+
+---
+
+## 🚀 Pistes d'Amélioration & Évolutions Futures
+
+- [x] **Analyse complète de match à 2 joueurs** avec séquençage des points.
+- [x] **Prise en compte des changements de côté entre les sets**.
+- [x] **Comptabilisation des points gagnants (Winners) et fautes directes par coup**.
+- [ ] **Détection précise de l'impact de la balle sur la table** avec un modèle YOLO-Ball haute vitesse (120/240 fps).
+- [ ] **Carte thermique (Heatmap) des zones d'impact de balle** sur la demi-table adverse.
+- [ ] **Export de rapport PDF officiel de match** pour l'entraîneur et le joueur.
+
