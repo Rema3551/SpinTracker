@@ -11,6 +11,13 @@ import os
 import sys
 import importlib
 
+# S'assurer que stdout supporte l'UTF-8 sur Windows
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 # S'assurer que le dossier 'src' est présent dans sys.path pour les imports
 SRC_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.abspath(os.path.join(SRC_DIR, ".."))
@@ -18,8 +25,7 @@ PROJECT_ROOT = os.path.abspath(os.path.join(SRC_DIR, ".."))
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-# Note : On utilise importlib car les noms de modules débutant par un chiffre
-# ne peuvent pas être importés directement avec 'from 01_... import ...' en syntaxe Python standard.
+# Import dynamique des étapes
 extract_mod = importlib.import_module("01_extract_landmarks")
 features_mod = importlib.import_module("02_build_features")
 train_mod = importlib.import_module("03_train_model")
@@ -33,20 +39,20 @@ def main():
     os.chdir(PROJECT_ROOT)
     
     print("========================================")
-    print("🏓 Démarrage de la pipeline SpinTracker...")
+    print("Demarrage de la pipeline SpinTracker...")
     print("========================================")
     
-    print("\n[1/3] Extraction des repères MediaPipe...")
+    print("\n[1/3] Extraction des reperes MediaPipe...")
     run_extraction()
 
-    print("\n[2/3] Calcul des caractéristiques biomécaniques...")
+    print("\n[2/3] Calcul des caracteristiques biomecaniques...")
     process_features()
 
-    print("\n[3/3] Entraînement et évaluation du modèle...")
+    print("\n[3/3] Entrainement et evaluation du modele...")
     train_classifier()
 
     print("\n========================================")
-    print("✅ Pipeline terminée avec succès !")
+    print("Pipeline terminee avec succes !")
     print("========================================")
 
 if __name__ == "__main__":

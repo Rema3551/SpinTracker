@@ -8,11 +8,8 @@ Objectif :
 """
 
 import os
-# pyrefly: ignore [missing-import]
 import cv2
-# pyrefly: ignore [missing-import]
 import pandas as pd
-# pyrefly: ignore [missing-import]
 import mediapipe as mp
 
 mp_pose = mp.solutions.pose
@@ -30,37 +27,65 @@ LANDMARK_IDS = {
 def extract_from_video(video_path: str, label: str, video_id: str) -> list[dict]:
     """
     Lit une vidéo et extrait les coordonnées des repères pour chaque frame.
-    
-    À faire :
-    1. Ouvrir le flux vidéo avec cv2.VideoCapture(video_path)
-    2. Initialiser MediaPipe Pose dans un contexte 'with'
-    3. Boucler sur les frames tant que la vidéo est ouverte (cap.isOpened())
-    4. Convertir chaque frame en RGB
-    5. Appliquer pose.process() et récupérer results.pose_landmarks
-    6. Pour chaque frame détectée, construire un dictionnaire avec :
-       - video_id, label, frame_idx
-       - {name}_x, {name}_y, {name}_z pour chaque point dans LANDMARK_IDS
-    7. Ne pas oublier de libérer la vidéo avec cap.release()
-    8. Retourner la liste des dictionnaires (une entrée par frame)
+    Retourne 1 dictionnaire par frame contenant les coordonnées des repères clés.
     """
     records = []
-    # TODO: À toi de coder l'extraction ici !
+    video = cv2.VideoCapture(video_path)
+    if not video.isOpened():
+        return records
+
+    pose = mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5)
+    frame_idx = 0
+
+    while video.isOpened():
+        ret, frame = video.read()
+        if not ret:
+            break
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = pose.process(frame_rgb)
+
+        if results.pose_landmarks:
+            landmarks = results.pose_landmarks.landmark
+            row = {
+                "video_id": video_id,
+                "label": label,
+                "frame_idx": frame_idx
+            }
+            for name, idx in LANDMARK_IDS.items():
+                row[f"{name}_x"] = landmarks[idx].x
+                row[f"{name}_y"] = landmarks[idx].y
+                row[f"{name}_z"] = landmarks[idx].z
+            records.append(row)
+
+        frame_idx += 1
+
+    video.release()
+    pose.close()
     return records
 
 def run_extraction(raw_dir: str = "data/raw_videos", output_csv: str = "data/processed/raw_landmarks.csv"):
     """
     Parcourt l'ensemble des sous-dossiers de raw_dir, extrait les landmarks
     et enregistre le DataFrame final dans output_csv.
-    
-    À faire :
-    1. Créer le dossier parent de output_csv s'il n'existe pas (os.makedirs)
-    2. Parcourir les labels (dossiers dans raw_dir)
-    3. Pour chaque vidéo (.mp4, .mov, etc.), appeler extract_from_video(...)
-    4. Créer un pd.DataFrame à partir de toutes les données extraites
-    5. Sauvegarder en CSV sans index (to_csv)
     """
-    # TODO: À toi de coder le parcours des dossiers et la sauvegarde CSV !
-    pass
+    parent_dir = os.path.dirname(output_csv)
+    os.makedirs(parent_dir, exist_ok=True)
+    all_records = []
+
+    for label in os.listdir(raw_dir):
+        label_dir = os.path.join(raw_dir, label)
+        if os.path.isdir(label_dir):
+            for video_id in os.listdir(label_dir):
+                if video_id.lower().endswith((".mp4", ".mov", ".avi")):
+                    video_path = os.path.join(label_dir, video_id)
+                    if os.path.isfile(video_path):
+                        print(f"[01] Traitement de : {video_path} (classe: {label})")
+                        records = extract_from_video(video_path, label, video_id)
+                        all_records.extend(records)
+
+    df = pd.DataFrame(all_records)
+    df.to_csv(output_csv, index=False)
+    print(f"[01] Extraction terminée : {len(df)} frames extraites -> {output_csv}")
 
 if __name__ == "__main__":
     run_extraction()
